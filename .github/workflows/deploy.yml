@@ -1,0 +1,44 @@
+name: Deploy to OCI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Pull latest code onto the VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Configure SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_OCI_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy
+        run: |
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes \
+              "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+              'set -e
+               cd /var/www/mercado.es.eu.org
+               git pull origin main
+               git log -1 --oneline'
+
+      - name: Verify the site is live
+        run: |
+          sleep 3
+          code=$(curl -sS -o /dev/null -w "%{http_code}" https://mercado.es.eu.org)
+          echo "HTTP status: $code"
+          test "$code" = "200"
+
+      - name: Remove credentials from the runner
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
